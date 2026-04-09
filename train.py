@@ -18,12 +18,12 @@ def main():
     model = JetGNN(in_channels=in_channels)
 
     model = nbtools.train_model(
-    model,
-    train_loader,
-    val_loader=val_loader,   # or split a validation set
-    epochs=10,
-    patience=5,
-    save_every=1
+            model,
+            train_loader,
+            val_loader=val_loader,   # or split a validation set
+            epochs=10,
+            patience=5,
+            save_every=1
     )
     acc, auc = nbtools.evaluate_model(model, test_loader)
 
