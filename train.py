@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from models import *
 from data import get_dataloaders
 import notebook_tools as nbtools
+import json
 
 # =========================================================
 # Main training loop
@@ -17,15 +18,20 @@ def main():
     # --- Model ---
     model = JetGNN(in_channels=in_channels)
 
-    model = nbtools.train_model(
+    model, history = nbtools.train_model(
             model,
             train_loader,
             val_loader=val_loader,   # or split a validation set
-            epochs=10,
+            epochs=50,
             patience=5,
             save_every=1
     )
     acc, auc = nbtools.evaluate_model(model, test_loader)
+
+    with open("training_history_JetGNN.json", "w") as f:
+        json.dump(history, f, indent=4)
+
+    print("📁 Saved training history to training_history.json")
 
 
 # =========================================================
