@@ -105,8 +105,11 @@ def train_model(
     save_every=1
 ):
     # Device setup
-    if device is None:
-        device = torch.device("mps")
+    device = device or torch.device(
+    "cuda" if torch.cuda.is_available()
+    else "mps" if torch.backends.mps.is_available()
+    else "cpu"
+    )
 
     model = model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -197,8 +200,11 @@ def train_model(
 
 def evaluate_model(model, test_loader, device=None):
     ## Device Setup
-    if device is None:
-        device = torch.device("mps")
+    device = device or torch.device(
+    "cuda" if torch.cuda.is_available()
+    else "mps" if torch.backends.mps.is_available()
+    else "cpu"
+    )
 
     model.eval()
 
