@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import os
 import time
 from datetime import datetime
+import json
 
 
 def delta_phi(phi1, phi2):
@@ -105,7 +106,9 @@ def train_model(
     device=None,
     checkpoint_path="checkpoint.pt",
     patience=5,
-    save_every=1
+    save_every=1,
+    save_history_every_epoch=False,
+    history_dir="history_logs"
 ):
     # Device setup
     device = device or torch.device(
@@ -121,16 +124,11 @@ def train_model(
     best_loss = float("inf")
     patience_counter = 0
 
-    # 📊 History for plotting
-    history = {
-        "train_loss": [],
-        "val_loss": [],
-        "val_acc": [],
-        "val_auc": [],
-        "epoch_time": []
-    }
+    # Create history directory
+    if save_history_every_epoch:
+        os.makedirs(history_dir, exist_ok=True)
 
-    # Resume from checkpoint
+    # Resume checkpoint FIRST
     if os.path.exists(checkpoint_path):
         print("Loading checkpoint...")
         checkpoint = torch.load(checkpoint_path, map_location=device)
@@ -141,6 +139,40 @@ def train_model(
         best_loss = checkpoint["best_loss"]
 
         print(f"Resumed from epoch {start_epoch}")
+
+    # History container
+    history = {
+        "train_loss": [],
+        "val_loss": [],
+        "val_acc": [],
+        "val_auc": [],
+        "epoch_time": []
+    }
+
+    # Load existing history safely
+    if save_history_every_epoch and os.path.exists(history_dir):
+        existing_files = sorted(
+            [f for f in os.listdir(history_dir) if f.startswith("epoch_")],
+            key=lambda x: int(x.split("_")[1].split(".")[0])
+        )
+
+        for file in existing_files:
+            with open(os.path.join(history_dir, file), "r") as f:
+                data = json.load(f)
+
+            history["train_loss"].append(data["train_loss"])
+            history["val_loss"].append(data["val_loss"])
+            history["val_acc"].append(data["val_acc"])
+            history["val_auc"].append(data["val_auc"])
+            history["epoch_time"].append(data["epoch_time"])
+
+        print(f"📂 Loaded {len(existing_files)} previous epochs of history")
+
+        # 🔧 Align history with checkpoint
+        if len(history["train_loss"]) > start_epoch:
+            print("⚠️ History ahead of checkpoint — trimming")
+            for key in history:
+                history[key] = history[key][:start_epoch]
 
     # Training loop
     for epoch in range(start_epoch, epochs):
@@ -183,7 +215,7 @@ def train_model(
                     loss = F.cross_entropy(out, batch.y)
                     val_loss += loss.item()
 
-                    probs = torch.softmax(out, dim=1)[:, 1]  # binary class prob
+                    probs = torch.softmax(out, dim=1)[:, 1]  # binary classification
                     preds = torch.argmax(out, dim=1)
 
                     all_preds.extend(probs.cpu().numpy())
@@ -194,25 +226,23 @@ def train_model(
             val_loss /= len(val_loader)
             val_acc /= len(val_loader.dataset)
 
-            # AUC (safe check)
             try:
                 val_auc = roc_auc_score(all_labels, all_preds)
             except:
                 val_auc = 0.0
 
-        # ⏱️ Timing
+        # Timing
         epoch_time = time.time() - epoch_start_time
-        history["epoch_time"].append(epoch_time)
 
-        # 📊 Store metrics
-        history["train_loss"].append(train_loss)
-        history["val_loss"].append(val_loss)
-        history["val_acc"].append(val_acc)
-        history["val_auc"].append(val_auc)
+        # Store history
+        history["train_loss"].append(float(train_loss))
+        history["val_loss"].append(float(val_loss))
+        history["val_acc"].append(float(val_acc))
+        history["val_auc"].append(float(val_auc))
+        history["epoch_time"].append(float(epoch_time))
 
-        # 🖨️ Logging with timestamp
+        # Logging
         timestamp = datetime.now().strftime("%H:%M:%S")
-
         print(
             f"[{timestamp}] Epoch {epoch+1} | "
             f"Train Loss: {train_loss:.4f} | "
@@ -221,6 +251,23 @@ def train_model(
             f"Val AUC: {val_auc:.4f} | "
             f"Time: {epoch_time:.2f}s"
         )
+
+        # Save per-epoch history
+        if save_history_every_epoch:
+            epoch_file = os.path.join(history_dir, f"epoch_{epoch+1}.json")
+
+            if os.path.exists(epoch_file):
+                print(f"⚠️ Overwriting {epoch_file}")
+
+            with open(epoch_file, "w") as f:
+                json.dump({
+                    "epoch": epoch + 1,
+                    "train_loss": float(train_loss),
+                    "val_loss": float(val_loss),
+                    "val_acc": float(val_acc),
+                    "val_auc": float(val_auc),
+                    "epoch_time": float(epoch_time)
+                }, f, indent=4)
 
         # Save checkpoint
         if (epoch + 1) % save_every == 0:
@@ -238,7 +285,6 @@ def train_model(
 
             torch.save(model.state_dict(), "best_model.pt")
             print("✅ Saved best model")
-
         else:
             patience_counter += 1
 
@@ -249,6 +295,12 @@ def train_model(
                 print("Loading best model before returning...")
                 model.load_state_dict(torch.load("best_model.pt", map_location=device))
             break
+
+    # Save full history
+    with open("training_history.json", "w") as f:
+        json.dump(history, f, indent=4)
+
+    print("📁 Saved full training history")
 
     return model, history
 
