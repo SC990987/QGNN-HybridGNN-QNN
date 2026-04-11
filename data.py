@@ -80,13 +80,13 @@ def split_data(graph_list, seed=42):
     return train_data, val_data, test_data
 
 
-def get_dataloaders(batch_size=32, k=16):
+def get_dataloaders(batch_size=32, k=16, seed=42):
     download_dataset()
 
     X, y = load_raw_data()
     graph_list = build_graphs(X, y, k=k)
 
-    train_data, val_data, test_data = split_data(graph_list)
+    train_data, val_data, test_data = split_data(graph_list, seed=seed)
 
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
     val_loader   = DataLoader(val_data, batch_size=batch_size)
