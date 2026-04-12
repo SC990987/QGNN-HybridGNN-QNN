@@ -108,7 +108,9 @@ def train_model(
     patience=5,
     save_every=1,
     save_history_every_epoch=False,
-    history_dir="history_logs"
+    history_dir="history_logs",
+    model_name = "",
+    training_history = "",
 ):
     # Device setup
     device = device or torch.device(
@@ -283,7 +285,7 @@ def train_model(
             best_loss = val_loss
             patience_counter = 0
 
-            torch.save(model.state_dict(), "best_model.pt")
+            torch.save(model.state_dict(), f"{model_name}.pt")
             print("✅ Saved best model")
         else:
             patience_counter += 1
@@ -293,11 +295,11 @@ def train_model(
             print("⏹ Early stopping triggered")
             if os.path.exists("best_model.pt"):
                 print("Loading best model before returning...")
-                model.load_state_dict(torch.load("best_model.pt", map_location=device))
+                model.load_state_dict(torch.load(f"{model_name}.pt", map_location=device))
             break
 
     # Save full history
-    with open("training_history.json", "w") as f:
+    with open(f"{training_history}.json", "w") as f:
         json.dump(history, f, indent=4)
 
     print("📁 Saved full training history")

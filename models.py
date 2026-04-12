@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch_geometric.nn import SAGEConv, EdgeConv, global_mean_pool
 
 # 🔹 Import QNN circuits
-from qnn import qnn_circuit_basic, qnn_circuit_improved
+from qnn import qnn_circuit_basic, qnn_circuit_improved, qnn_torch
 
 
 # =========================================================
@@ -193,3 +193,42 @@ class JetGNN(torch.nn.Module):
         x = global_mean_pool(x, batch)
         return self.lin(x)
 
+# =========================================================
+# Hybrid GNN + QNN (Basic + torch)
+# =========================================================
+class HybridGNN_QNN_basic_torch(torch.nn.Module):
+    def __init__(self, in_channels, hidden_dim=64, n_qubits=8, q_layers=4):
+        super().__init__()
+
+        self.n_qubits = n_qubits
+
+        # --- GNN Backbone ---
+        self.conv1 = SAGEConv(in_channels, hidden_dim)
+        self.conv2 = SAGEConv(hidden_dim, hidden_dim)
+        self.lin_proj = torch.nn.Linear(hidden_dim, n_qubits)
+
+        # --- QNN Parameters ---
+        self.q_weights = torch.nn.Parameter(
+            0.01 * torch.randn(q_layers, n_qubits)
+        )
+
+        # --- Final Classifier ---
+        self.fc = torch.nn.Linear(n_qubits, 2)
+
+    def forward(self, x, edge_index, batch):
+        # GNN
+        x = F.relu(self.conv1(x, edge_index))
+        x = F.relu(self.conv2(x, edge_index))
+        x = global_mean_pool(x, batch)
+
+        # Project to quantum space
+        x = self.lin_proj(x)
+        x = torch.tanh(x) * torch.pi
+
+        # --- QNN ---
+        device = x.device
+
+        # Convert tuple -> tensor
+        x = qnn_torch(x, self.q_weights, self.n_qubits)
+
+        return self.fc(x)

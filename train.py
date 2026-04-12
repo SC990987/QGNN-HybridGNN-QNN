@@ -16,7 +16,7 @@ def main():
     train_loader, val_loader, test_loader = get_dataloaders(batch_size=32)
     in_channels = train_loader.dataset[0].x.shape[1]
     # --- Model ---
-    model = HybridGNN_QNN_basic(in_channels=in_channels)
+    model = HybridGNN_QNN_basic_torch(in_channels=in_channels)
 
     model, history = nbtools.train_model(
             model,
@@ -25,8 +25,9 @@ def main():
             epochs=50,
             patience=5,
             save_every=1,
-            save_history_every_epoch=True,          # ✅ NEW
-            history_dir="history_logs_QGNN_basic"              # ✅ NEW
+            model_name=f"GNN_QNN_Basic_Seed_best_model",
+            training_history=f"GNN_QNN_Basic_Seed_training_history",
+            checkpoint_path=f"GNN_QNN_Basic_Seed_checkpoint",
     )
     acc, auc = nbtools.evaluate_model(model, test_loader)
 
