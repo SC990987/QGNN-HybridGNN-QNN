@@ -3,8 +3,8 @@
 import torch
 import torch.nn.functional as F
 
-from models import *
-from data import get_dataloaders
+from qgnn_hybrid.models import *
+from qgnn_hybrid.data import get_dataloaders
 import qgnn_hybrid.utils as nbtools
 import json
 
