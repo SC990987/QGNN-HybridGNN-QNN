@@ -1,0 +1,11 @@
+torch
+torch-geometric
+pennylane
+numpy
+pandas
+scikit-learn
+matplotlib
+tqdm
+pyyaml
+jupyter
+pytest
