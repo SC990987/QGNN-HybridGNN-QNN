@@ -142,14 +142,11 @@ class HybridGNN_MLP(torch.nn.Module):
         self.conv1 = SAGEConv(in_channels, hidden_dim)
         self.conv2 = SAGEConv(hidden_dim, hidden_dim)
         self.lin_proj = torch.nn.Linear(hidden_dim, n_qubits)
+        
         self.mlp = torch.nn.Sequential(
             torch.nn.Linear(n_qubits, n_qubits),
             torch.nn.ReLU(),
             torch.nn.Linear(n_qubits, n_qubits)
-        )
-        ## QNN Params
-        self.q_weights = torch.nn.Parameter(
-            0.01 * torch.randn(q_layers, n_qubits)
         )
 
         ## Final Classifier

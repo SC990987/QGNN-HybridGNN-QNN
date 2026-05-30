@@ -1,0 +1,65 @@
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+
+# Environments
+.venv/
+venv/
+env/
+*.egg-info/
+
+# Data
+data/raw/
+data/processed/
+*.npz
+*.h5
+*.parquet
+
+# Model artifacts
+*.pt
+*.pth
+*.ckpt
+*_checkpoint
+checkpoint.pt
+SavedModels/
+TrainingHistory/
+history_logs*/
+outputs/
+
+# Logs
+*.log
+wandb/
+runs/
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
+# Local backups / generated artifacts
+artifacts_backup/
+
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# Model artifacts
+*.pt
+*.pth
+*.ckpt
+*_checkpoint
+checkpoint.pt
+SavedModels/
+TrainingHistory/
+history_logs*/
+
+# Data
+*.npz
+data/raw/
+data/processed/
+
+# OS
+.DS_Store
