@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch_geometric.nn import SAGEConv, EdgeConv, global_mean_pool
 
 # 🔹 Import QNN circuits
-from qnn import qnn_circuit_basic, qnn_circuit_improved, qnn_torch
+from qgnn_hybrid.qnn import qnn_circuit_basic, qnn_circuit_improved, qnn_torch
 
 
 # =========================================================

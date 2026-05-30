@@ -9,7 +9,7 @@ import random
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 
-import notebook_tools as nbtools  # your preprocessing module
+import qgnn_hybrid.utils as nbtools  # your preprocessing module
 
 
 def download_dataset(path="QG_jets.npz"):

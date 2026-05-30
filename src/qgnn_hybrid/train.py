@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 from models import *
 from data import get_dataloaders
-import notebook_tools as nbtools
+import qgnn_hybrid.utils as nbtools
 import json
 
 # =========================================================
