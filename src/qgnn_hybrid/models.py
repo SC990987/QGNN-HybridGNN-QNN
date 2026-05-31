@@ -395,19 +395,6 @@ class ParticleNet(torch.nn.Module):
         return self.fc2(x)
 
 
-# =========================================================
-# Backward-compatible aliases for older notebooks/scripts
-# =========================================================
-HybridGNN_QNN_basic = HybridGNN_QNN_Basic_PennyLane
-HybridGNN_QNN_improved = HybridGNN_QNN_Improved_PennyLane
-
-HybridGNN_QNN_basic_torch = HybridGNN_QNN_Basic_Torch
-HybridGNN_QNN_improved_torch = HybridGNN_QNN_Improved_Torch
-
-HybridGNN_QNN_legacy_torch = HybridGNN_QNN_LegacyCRY_Torch
-HybridGNN_QNN_legacy_cry_torch = HybridGNN_QNN_LegacyCRY_Torch
-
-
 __all__ = [
     "GraphSAGEEncoder",
     "HybridGNN_QNN_Basic_PennyLane",
