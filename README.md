@@ -151,6 +151,9 @@ The PennyLane circuits are kept as clear reference implementations. The fast PyT
 
 The default fast QNN models use CNOT entanglement to match the PennyLane reference circuits. The legacy CRY model is kept separately and is not treated as equivalent to the CNOT-based reference circuit.
 
+Optional `torch.compile` experiments for the fast QNN backend are being tested on a separate branch. The main branch uses eager PyTorch execution for stability across CPU, CUDA, and Apple Silicon/MPS environments. In particular, `torch.compile` may provide speedups on some hardware/compiler backends, but it is treated as experimental for this project until it is validated against the eager implementation.
+
+
 ## Installation
 
 Clone the repository:
@@ -383,11 +386,12 @@ These documents will describe graph construction, model architecture, quantum ci
 
 ## Acknowledgments
 
-This project uses a custom PyTorch-based quantum circuit simulator to accelerate hybrid quantum-classical model training. The original simulator implementation was developed by Eric Reinhardt and is used here with permission.
+This project uses a custom PyTorch-based quantum circuit simulator to accelerate hybrid quantum-classical model training. The original simulator implementation was developed by Eric A. F. Reinhardt and is used here with permission.
 
-The simulator provides differentiable implementations of common quantum gates and circuit operations, enabling faster experimentation with quantum machine learning models compared with relying only on the PennyLane reference implementation.
+The simulator provides differentiable implementations of common quantum gates and circuit operations, enabling faster experimentation with quantum machine learning models compared with relying only on the PennyLane reference implementation. The simulator work is based on Eric Reinhardt's `fastQML` project, which develops fast PyTorch quantum-circuit primitives via Kronecker-product layer fusion.
 
 All model integration with the graph neural network pipeline, benchmarking, and quark/gluon jet classification experiments were performed as part of this project.
+
 
 ## Limitations
 
@@ -439,6 +443,20 @@ This project demonstrates experience with:
 
 4. Qu, H., & Gouskos, L. “Jet tagging via particle clouds.” Physical Review D, 101(5), 056019, 2020.
 
+5. Reinhardt, E. A. F. `fastQML`: Fast PyTorch quantum-circuit primitives via Kronecker-product layer fusion. Version 0.1.0, 2026. https://github.com/ereinha/fastQML
+
 ## Status
 
 This repository is being cleaned and polished as a professional research portfolio project. Core model development is complete, and the current focus is reproducibility, documentation, tests, final multi-seed result summaries, and clean GitHub presentation.
+
+### Software Citation
+
+```bibtex
+@software{Reinhardt_fastQML_2026,
+  author  = {Reinhardt, Eric A. F.},
+  title   = {{fastQML}: Fast {PyTorch} quantum-circuit primitives via {K}ronecker-product layer fusion},
+  year    = {2026},
+  version = {0.1.0},
+  url     = {https://github.com/ereinha/fastQML}
+}
+```
