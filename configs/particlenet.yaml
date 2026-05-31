@@ -1,0 +1,15 @@
+model: particlenet
+
+batch_size: 32
+epochs: 50
+patience: 5
+seed: 42
+lr: 0.001
+
+hidden_dim: 64
+n_qubits: 8
+q_layers: 4
+
+output_dir: outputs/particlenet
+save_every: 1
+save_history_every_epoch: false

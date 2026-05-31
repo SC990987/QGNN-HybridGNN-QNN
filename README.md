@@ -2,7 +2,7 @@
 
 A reproducible machine learning research project exploring hybrid quantum-classical graph neural networks for quark/gluon jet classification in high energy physics.
 
-This repository implements and benchmarks classical Graph Neural Network models and a hybrid Graph Neural Network–Quantum Neural Network architecture for particle jet tagging. Each jet is represented as a graph, where particles are nodes and edges encode angular relationships between particles. A classical GNN learns a graph-level jet representation, which is then processed by either a classical multilayer perceptron or a variational quantum circuit for final classification.
+This repository implements and benchmarks classical Graph Neural Network models and hybrid Graph Neural Network–Quantum Neural Network models for particle jet tagging. Each jet is represented as a graph, where particles are nodes and edges encode angular relationships between particles. A classical GNN learns a graph-level jet representation, which is then processed by either a classical MLP head or a variational quantum circuit.
 
 ## Project Overview
 
@@ -19,28 +19,31 @@ The main goals of this project are:
 * Build a reproducible quark/gluon jet classification pipeline.
 * Represent particle jets as graphs using particle-level kinematic features.
 * Train classical GNN baselines for comparison.
-* Implement a hybrid GNN-QNN model using PyTorch, PyTorch Geometric, and PennyLane.
+* Implement hybrid GNN-QNN models using PyTorch, PyTorch Geometric, and PennyLane.
+* Add a faster PyTorch-based QNN simulator backend for training experiments.
 * Compare classical and hybrid models using accuracy and ROC-AUC.
-* Document the model design, training workflow, limitations, and future directions.
+* Document model design, training workflow, limitations, and future directions.
 
 ## Repository Structure
 
 ```text
 QGNN-HybridGNN-QNN/
 │
-├── configs/                 # YAML configuration files for experiments
-├── data/                    # Local data directory; raw data is not committed
+├── configs/                 # YAML configuration files for training runs
+├── data/                    # Local data directory; raw/processed data are not committed
 ├── docs/                    # Additional project documentation
 ├── notebooks/               # Summary and visualization notebooks
 ├── results/                 # Final metrics, plots, and result summaries
-├── scripts/                 # Command-line scripts for training/evaluation
+├── scripts/                 # Optional helper scripts
 ├── src/
 │   └── qgnn_hybrid/          # Main Python package
-│       ├── data.py           # Dataset loading and graph construction
+│       ├── __init__.py
+│       ├── data.py           # Dataset loading, downloading, graph construction, caching
 │       ├── models.py         # Classical and hybrid GNN architectures
-│       ├── qnn.py            # PennyLane quantum circuit components
-│       ├── train.py          # Training utilities
-│       └── utils.py          # Plotting and helper functions
+│       ├── qnn.py            # PennyLane QNNs and fast PyTorch QNN wrappers
+│       ├── qnn_fast.py       # Fast PyTorch quantum circuit simulation utilities
+│       ├── train.py          # Command-line training entry point
+│       └── utils.py          # Preprocessing, graph utilities, training, evaluation
 ├── tests/                   # Unit and smoke tests
 ├── pyproject.toml           # Package configuration
 ├── requirements.txt         # Python dependencies
@@ -61,50 +64,53 @@ Expected local structure:
 
 ```text
 data/
-└── raw/
-    └── QG_jets.npz
+├── raw/
+│   └── QG_jets.npz
+└── processed/
+    └── qg_jets_k16.pt
 ```
 
-Instructions for downloading or preparing the dataset are coming soon.
+The dataset is downloaded automatically by `qgnn_hybrid.data.download_dataset()` if it is not already present. Processed graph objects are cached under `data/processed/` so repeated training runs do not need to rebuild the graph dataset from scratch.
 
 ## Graph Construction
 
 Each jet is represented as a graph:
 
 * Nodes represent particles.
-* Node features include particle-level kinematic information.
-* Edges connect nearby particles in angular space.
+* Node features are derived from particle-level kinematics.
+* Edges connect nearby particles in angular space using k-nearest neighbors.
+* Edge features encode angular separation information.
 * The graph is passed into a GNN to learn a jet-level representation.
 
 Current graph construction details:
 
 ```text
-k-nearest neighbors: Coming soon
-node features: Coming soon
-edge features: Coming soon
-maximum particles per jet: Coming soon
-train/validation/test split: Coming soon
+k-nearest neighbors: 16
+node features: standardized log(pt), standardized eta, sin(phi), cos(phi)
+edge features: delta_eta, delta_phi, delta_R
+default split: 70% train, 15% validation, 15% test
+processed graph cache: data/processed/qg_jets_k16.pt
 ```
 
 ## Models
 
-### Classical GNN Baselines
+This repository includes classical GNN baselines, hybrid GNN-QNN models, and fast PyTorch QNN simulator variants.
 
-This repository includes classical graph-based baselines for comparison.
+### Classical Baselines
 
-Implemented or planned baselines include:
+Implemented classical models:
 
-* GraphSAGE
-* ParticleNet-style EdgeConv model
-* GNN with classical MLP classification head
+* `graphsage` — simple GraphSAGE baseline.
+* `particlenet` — lightweight ParticleNet-style EdgeConv baseline.
+* `gnn_mlp` — GraphSAGE encoder followed by a classical MLP head.
 
 These baselines establish the classical performance level needed to evaluate whether the quantum component provides useful representational power.
 
-### Hybrid GNN-QNN Model
+### Hybrid GNN-QNN Models
 
-The hybrid model uses a classical GNN backbone followed by a variational quantum circuit.
+The hybrid models use a classical GraphSAGE encoder followed by a quantum neural network head.
 
-The pipeline is:
+The general pipeline is:
 
 ```text
 Particle jet
@@ -117,7 +123,7 @@ Global mean pooling
    ↓
 Linear projection to quantum feature space
    ↓
-Variational quantum circuit
+Quantum neural network
    ↓
 Pauli-Z expectation values
    ↓
@@ -126,18 +132,24 @@ Final classifier
 Quark/gluon prediction
 ```
 
-The quantum circuit is implemented using PennyLane. Classical features are encoded into the circuit using rotation gates, followed by entangling CNOT layers and trainable single-qubit rotations. The final quantum state is measured using Pauli-Z expectation values, producing a vector of quantum features for classification.
+Implemented hybrid models:
 
-Current quantum circuit settings:
+* `qnn_basic_pennylane` — PennyLane reference implementation with RY encoding, ring CNOT entanglement, and trainable RY rotations.
+* `qnn_improved_pennylane` — PennyLane reference implementation with data re-uploading, RX/RY/RZ rotations, ring CNOTs, and longer-range CNOTs.
+* `qnn_basic_torch` — fast PyTorch simulator equivalent of the basic PennyLane CNOT-based circuit.
+* `qnn_improved_torch` — fast PyTorch simulator equivalent of the improved PennyLane CNOT-based circuit.
+* `qnn_legacy_cry_torch` — legacy fast PyTorch QNN using CRY(pi/2) entanglement, retained for reproducibility of early experiments.
 
-```text
-number of qubits: 8
-encoding: RY angle embedding
-entanglement: ring CNOT pattern
-trainable gates: RY rotations
-measurement: Pauli-Z expectation values
-circuit depth: Coming soon
-```
+### Quantum Circuit Backends
+
+This repository contains two QNN backends:
+
+1. **PennyLane reference circuits** in `qnn.py`
+2. **Fast PyTorch simulator circuits** using functions from `qnn_fast.py`
+
+The PennyLane circuits are kept as clear reference implementations. The fast PyTorch simulator is used for faster differentiable QNN training experiments.
+
+The default fast QNN models use CNOT entanglement to match the PennyLane reference circuits. The legacy CRY model is kept separately and is not treated as equivalent to the CNOT-based reference circuit.
 
 ## Installation
 
@@ -167,36 +179,105 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
+If `yaml` is missing, install PyYAML:
+
+```bash
+python -m pip install pyyaml
+```
+
 PyTorch Geometric installation may depend on your local PyTorch, CUDA, or Apple Silicon configuration. See the official PyTorch Geometric installation guide if needed.
 
 ## Usage
 
-### Train a classical GNN-MLP model
+Run commands from the repository root:
 
 ```bash
-python scripts/train.py --config configs/gnn_mlp.yaml
+cd QGNN-HybridGNN-QNN
 ```
 
-### Train the hybrid GNN-QNN model
+### Debug run
+
+Use this to test that the pipeline works before launching a full training run:
 
 ```bash
-python scripts/train.py --config configs/gnn_qnn.yaml
+python -m qgnn_hybrid.train --config configs/debug_gnn_mlp.yaml
 ```
 
-### Evaluate trained models
+### Train classical baselines
 
 ```bash
-python scripts/evaluate.py --config configs/gnn_mlp.yaml
-python scripts/evaluate.py --config configs/gnn_qnn.yaml
+python -m qgnn_hybrid.train --config configs/graphsage.yaml
+python -m qgnn_hybrid.train --config configs/particlenet.yaml
+python -m qgnn_hybrid.train --config configs/gnn_mlp.yaml
 ```
 
-### Generate plots and result summaries
+### Train hybrid QNN models
 
 ```bash
-python scripts/make_plots.py
+python -m qgnn_hybrid.train --config configs/qnn_basic_torch.yaml
+python -m qgnn_hybrid.train --config configs/qnn_improved_torch.yaml
+python -m qgnn_hybrid.train --config configs/qnn_legacy_cry_torch.yaml
 ```
 
-Command-line scripts are under active cleanup. Final reproducible commands are coming soon.
+### Override config values from the command line
+
+```bash
+python -m qgnn_hybrid.train --config configs/qnn_basic_torch.yaml --seed 43
+python -m qgnn_hybrid.train --config configs/qnn_basic_torch.yaml --epochs 10 --batch-size 16
+```
+
+### Available model names
+
+```text
+graphsage
+particlenet
+gnn_mlp
+qnn_basic_torch
+qnn_improved_torch
+qnn_legacy_cry_torch
+qnn_basic_pennylane
+qnn_improved_pennylane
+```
+
+## Configuration Files
+
+Training runs are controlled with YAML files in `configs/`.
+
+Example:
+
+```yaml
+model: qnn_basic_torch
+
+batch_size: 32
+epochs: 50
+patience: 5
+seed: 42
+lr: 0.001
+
+hidden_dim: 64
+n_qubits: 8
+q_layers: 4
+
+output_dir: outputs/qnn_basic_torch
+save_every: 1
+save_history_every_epoch: false
+```
+
+The command-line arguments override values from the YAML config.
+
+## Outputs
+
+Training outputs are saved under the configured `output_dir`, for example:
+
+```text
+outputs/qnn_basic_torch/
+├── qnn_basic_torch_seed_42_best_model.pt
+├── qnn_basic_torch_seed_42_checkpoint.pt
+├── qnn_basic_torch_seed_42_training_history.json
+└── qnn_basic_torch_seed_42_metrics.json
+```
+
+The `outputs/` directory is ignored by Git because it contains generated checkpoints and experiment artifacts.
 
 ## Results
 
@@ -228,47 +309,64 @@ results/
 The hybrid GNN-QNN model achieves competitive performance with classical graph neural network baselines, but the current classical GNN-MLP model remains slightly stronger in terms of test AUC. This project should therefore be interpreted as a reproducible benchmark of hybrid quantum-classical architectures for jet classification, rather than a claim of quantum advantage.
 
 The results suggest that hybrid quantum-classical models can be integrated into graph-based particle physics workflows, but further work is needed to understand when quantum circuits provide practical advantages over well-tuned classical architectures.
-
 ## Reproducibility
 
-This project is being organized to support reproducible experimentation through:
+This project is organized to support reproducible experimentation through:
 
 * Config-driven training
 * Fixed random seeds
+* Cached graph preprocessing
 * Multi-seed evaluation
 * Saved metrics summaries
 * Version-controlled source code
 * Lightweight result files
-* Ignored raw data and model checkpoints
+* Ignored raw data, processed data, checkpoints, and generated outputs
+* Pytest smoke tests for imports, QNN forward passes, model forward passes, and a minimal training/evaluation loop
 
-Planned reproducibility checklist:
+Current reproducibility checklist:
 
 ```text
-[ ] Finalize dataset download/preparation script
-[ ] Finalize YAML configs
-[ ] Add exact package versions
-[ ] Add multi-seed summary script
-[ ] Add final results CSV files
-[ ] Add final plots
-[ ] Add smoke tests
+[x] Package-style source layout
+[x] Editable install with pyproject.toml
+[x] YAML training configs
+[x] Fixed random seeds
+[x] Cached graph preprocessing
+[x] Multiple model variants
+[x] Fast PyTorch QNN backend
+[x] Pytest smoke tests
+[ ] Final multi-seed summary script
+[ ] Final results CSV files
+[ ] Final plots
 ```
 
 ## Testing
 
-Run tests with:
+This repository includes a small pytest smoke-test suite to verify that the main package components work after code changes.
+
+Run the tests from the repository root:
 
 ```bash
-pytest
+python -m pytest -q
 ```
 
-Current tests are coming soon.
+The current smoke tests check:
 
-Planned tests include:
+* Package and module imports
+* Fast QNN forward passes
+* Hybrid and classical model forward passes on synthetic PyTorch Geometric graphs
+* A one-epoch synthetic training/evaluation loop
+* Checkpoint, best-model, and training-history file creation
 
-* Package import test
-* Data-loading smoke test
-* Model forward-pass test
-* Training-loop smoke test on a small batch
+Example successful output:
+
+```text
+10 passed
+```
+
+These tests do not download the full quark/gluon dataset. They use small synthetic graph batches so that the test suite runs quickly and can be used as a lightweight sanity check during development.
+
+Some warnings may appear from PyTorch or PyTorch Geometric, especially on newer Python versions. These warnings are external dependency warnings and do not indicate test failures.
+
 
 ## Documentation
 
@@ -281,30 +379,39 @@ docs/
 └── results_interpretation.md
 ```
 
-These documents will describe the graph construction, model architecture, quantum circuit design, and interpretation of the results.
+These documents will describe graph construction, model architecture, quantum circuit design, fast simulator validation, and interpretation of the results.
+
+## Acknowledgments
+
+This project uses a custom PyTorch-based quantum circuit simulator to accelerate hybrid quantum-classical model training. The original simulator implementation was developed by Eric Reinhardt and is used here with permission.
+
+The simulator provides differentiable implementations of common quantum gates and circuit operations, enabling faster experimentation with quantum machine learning models compared with relying only on the PennyLane reference implementation.
+
+All model integration with the graph neural network pipeline, benchmarking, and quark/gluon jet classification experiments were performed as part of this project.
 
 ## Limitations
 
 This project currently has several important limitations:
 
-* Quantum circuit simulation is computationally expensive.
-* The current QNN layer operates on a reduced latent representation rather than the full particle graph.
+* Quantum circuit simulation remains computationally expensive compared with fully classical neural network layers.
+* The QNN layer operates on a reduced graph-level latent representation rather than directly on the full particle graph.
 * The hybrid model has not yet shown clear performance improvement over the best classical baseline.
-* Results depend on dataset size, graph construction choices, circuit depth, and random seed.
+* Results depend on dataset size, graph construction choices, circuit depth, random seed, and quantum circuit design.
 * The current implementation is designed for research benchmarking, not production deployment.
 
 ## Future Work
 
 Future improvements may include:
 
+* Multi-seed evaluation with mean and standard deviation
 * Hyperparameter scans over the number of qubits and circuit depth
 * Alternative quantum feature maps
 * Alternative entanglement patterns
-* More expressive GNN backbones
-* Larger multi-seed experiments
 * Runtime and parameter-efficiency comparisons
+* Validation of fast PyTorch circuits against PennyLane reference circuits
+* More expressive GNN backbones
 * Comparison against additional published jet-tagging baselines
-* Deployment of a lightweight inference demo
+* Extension to other graph-learning datasets, such as molecular property prediction or materials science benchmarks
 
 ## Skills Demonstrated
 
@@ -319,6 +426,7 @@ This project demonstrates experience with:
 * Scientific machine learning
 * Particle physics data analysis
 * Model benchmarking
+* Config-driven training
 * Reproducible ML project organization
 
 ## References
@@ -333,4 +441,4 @@ This project demonstrates experience with:
 
 ## Status
 
-This repository is currently being cleaned and polished as a professional research portfolio project. Core model development is complete, while documentation, scripts, tests, and final reproducibility improvements are in progress.
+This repository is being cleaned and polished as a professional research portfolio project. Core model development is complete, and the current focus is reproducibility, documentation, tests, final multi-seed result summaries, and clean GitHub presentation.
