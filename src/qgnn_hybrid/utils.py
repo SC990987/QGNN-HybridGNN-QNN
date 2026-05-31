@@ -9,7 +9,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.metrics import roc_auc_score
 
 
 # =========================================================
@@ -94,6 +94,13 @@ def json_safe(obj):
     return obj
 
 
+def count_parameters(model):
+    """
+    Count trainable model parameters.
+    """
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
 # =========================================================
 # Graph construction utilities
 # =========================================================
@@ -123,7 +130,6 @@ def preprocess(particles):
     phi:
         Centered and wrapped phi values.
     """
-    # Remove padded particles
     mask = particles[:, 0] > 0
     particles = particles[mask]
 
@@ -134,21 +140,16 @@ def preprocess(particles):
     eta = particles[:, 1]
     phi = particles[:, 2]
 
-    # Log-scale pt
     pt = torch.log(pt + 1e-6)
 
-    # Center jet coordinates
     eta = eta - eta.mean()
     phi = phi - phi.mean()
 
-    # Wrap phi back into [-pi, pi]
     phi = (phi + torch.pi) % (2 * torch.pi) - torch.pi
 
-    # Standardize pt and eta
     pt = (pt - pt.mean()) / (pt.std(unbiased=False) + 1e-6)
     eta = (eta - eta.mean()) / (eta.std(unbiased=False) + 1e-6)
 
-    # Encode phi continuously
     phi_sin = torch.sin(phi)
     phi_cos = torch.cos(phi)
 
@@ -176,10 +177,8 @@ def build_edge_index(eta, phi, k):
     d_phi = delta_phi(phi_i, phi_j)
     dR = torch.sqrt(d_eta**2 + d_phi**2)
 
-    # Do not ask for more neighbors than available nodes
     k_eff = min(k, num_nodes - 1)
 
-    # Nearest neighbors, skipping self
     knn = dR.topk(k=k_eff + 1, largest=False).indices[:, 1:]
 
     row = torch.arange(num_nodes, device=eta.device).repeat_interleave(k_eff)
@@ -206,19 +205,33 @@ def build_edge_features(edge_index, eta, phi):
 
 
 # =========================================================
-# Evaluation helper
+# Epoch helper
 # =========================================================
 def run_epoch(
     model,
     loader,
     device,
     optimizer=None,
+    compute_auc=True,
+    compute_accuracy=True,
 ):
     """
     Run one training or evaluation epoch.
 
     If optimizer is provided, the model is trained.
     If optimizer is None, the model is evaluated.
+
+    Parameters
+    ----------
+    compute_auc:
+        If True, collect prediction scores and labels to compute ROC-AUC.
+        For training epochs, this should usually be False to avoid expensive
+        device-to-CPU transfers every batch.
+
+    compute_accuracy:
+        If True, compute classification accuracy.
+        For training epochs on MPS/CUDA, this can be False to avoid an extra
+        device synchronization every batch.
     """
     is_training = optimizer is not None
     model.train() if is_training else model.eval()
@@ -250,23 +263,30 @@ def run_epoch(
 
             batch_size = labels.size(0)
             total_loss += loss.item() * batch_size
-
-            probs = torch.softmax(out, dim=1)[:, 1]
-            preds = torch.argmax(out, dim=1)
-
-            total_correct += (preds == labels).sum().item()
             total_examples += batch_size
 
-            all_scores.append(probs.detach().cpu().numpy())
-            all_labels.append(labels.detach().cpu().numpy())
+            if compute_accuracy:
+                preds = torch.argmax(out, dim=1)
+                total_correct += (preds == labels).sum().item()
+
+            if compute_auc:
+                probs = torch.softmax(out, dim=1)[:, 1]
+                all_scores.append(probs.detach().cpu().numpy())
+                all_labels.append(labels.detach().cpu().numpy())
 
     avg_loss = total_loss / max(total_examples, 1)
-    accuracy = total_correct / max(total_examples, 1)
 
-    all_scores = np.concatenate(all_scores) if all_scores else np.array([])
-    all_labels = np.concatenate(all_labels) if all_labels else np.array([])
+    if compute_accuracy:
+        accuracy = total_correct / max(total_examples, 1)
+    else:
+        accuracy = float("nan")
 
-    auc = safe_roc_auc(all_labels, all_scores) if len(all_labels) > 0 else float("nan")
+    if compute_auc and all_scores and all_labels:
+        all_scores = np.concatenate(all_scores)
+        all_labels = np.concatenate(all_labels)
+        auc = safe_roc_auc(all_labels, all_scores)
+    else:
+        auc = float("nan")
 
     return {
         "loss": float(avg_loss),
@@ -296,47 +316,11 @@ def train_model(
     """
     Train a model with optional validation, checkpointing, and early stopping.
 
-    This function is compatible with the current train.py script, which passes:
+    During training, only train loss is computed. Train accuracy and train AUC
+    are intentionally skipped to avoid extra device synchronization overhead,
+    especially on MPS/CUDA.
 
-        model_name=str(output_dir / f"{run_name}_best_model")
-        training_history=str(output_dir / f"{run_name}_training_history")
-        checkpoint_path=str(output_dir / f"{run_name}_checkpoint")
-
-    Parameters
-    ----------
-    model:
-        PyTorch model.
-    train_loader:
-        Training DataLoader.
-    val_loader:
-        Optional validation DataLoader.
-    epochs:
-        Maximum number of epochs.
-    lr:
-        Adam learning rate.
-    device:
-        Optional torch device or device string.
-    checkpoint_path:
-        Path for resumable checkpoint.
-    patience:
-        Early stopping patience based on validation loss.
-    save_every:
-        Save checkpoint every N epochs.
-    save_history_every_epoch:
-        If True, save one JSON file per epoch.
-    history_dir:
-        Directory for per-epoch history files.
-    model_name:
-        Output path prefix for best model. ".pt" is added if missing.
-    training_history:
-        Output path prefix for full training history. ".json" is added if missing.
-
-    Returns
-    -------
-    model:
-        Best model loaded at the end of training.
-    history:
-        Dictionary of training and validation metrics.
+    Validation AUC and test AUC are still computed.
     """
     device = get_device(device)
     model = model.to(device)
@@ -361,15 +345,12 @@ def train_model(
 
     history = {
         "train_loss": [],
-        "train_acc": [],
-        "train_auc": [],
         "val_loss": [],
         "val_acc": [],
         "val_auc": [],
         "epoch_time": [],
     }
 
-    # Resume checkpoint if available
     if checkpoint_path.exists():
         print(f"Loading checkpoint from {checkpoint_path}")
         checkpoint = torch.load(checkpoint_path, map_location=device)
@@ -384,9 +365,13 @@ def train_model(
         if "history" in checkpoint:
             history = checkpoint["history"]
 
+            # Backward compatibility with older checkpoints that stored
+            # training metrics we no longer track.
+            history.pop("train_auc", None)
+            history.pop("train_acc", None)
+
         print(f"Resumed from epoch {start_epoch}")
 
-    # Training loop
     for epoch in range(start_epoch, epochs):
         epoch_start_time = time.time()
 
@@ -395,6 +380,8 @@ def train_model(
             loader=train_loader,
             device=device,
             optimizer=optimizer,
+            compute_auc=False,
+            compute_accuracy=False,
         )
 
         if val_loader is not None:
@@ -403,39 +390,34 @@ def train_model(
                 loader=val_loader,
                 device=device,
                 optimizer=None,
+                compute_auc=True,
+                compute_accuracy=True,
             )
         else:
             val_metrics = {
                 "loss": train_metrics["loss"],
-                "accuracy": train_metrics["accuracy"],
-                "auc": train_metrics["auc"],
+                "accuracy": float("nan"),
+                "auc": float("nan"),
             }
 
         epoch_time = time.time() - epoch_start_time
 
         history["train_loss"].append(train_metrics["loss"])
-        history["train_acc"].append(train_metrics["accuracy"])
-        history["train_auc"].append(train_metrics["auc"])
-
         history["val_loss"].append(val_metrics["loss"])
         history["val_acc"].append(val_metrics["accuracy"])
         history["val_auc"].append(val_metrics["auc"])
-
         history["epoch_time"].append(float(epoch_time))
 
         timestamp = datetime.now().strftime("%H:%M:%S")
         print(
             f"[{timestamp}] Epoch {epoch + 1:03d}/{epochs} | "
             f"Train Loss: {train_metrics['loss']:.4f} | "
-            f"Train Acc: {train_metrics['accuracy']:.4f} | "
-            f"Train AUC: {train_metrics['auc']:.4f} | "
             f"Val Loss: {val_metrics['loss']:.4f} | "
             f"Val Acc: {val_metrics['accuracy']:.4f} | "
             f"Val AUC: {val_metrics['auc']:.4f} | "
             f"Time: {epoch_time:.2f}s"
         )
 
-        # Save per-epoch history if requested
         if save_history_every_epoch:
             epoch_file = history_dir / f"epoch_{epoch + 1}.json"
 
@@ -444,8 +426,6 @@ def train_model(
                     {
                         "epoch": epoch + 1,
                         "train_loss": train_metrics["loss"],
-                        "train_acc": train_metrics["accuracy"],
-                        "train_auc": train_metrics["auc"],
                         "val_loss": val_metrics["loss"],
                         "val_acc": val_metrics["accuracy"],
                         "val_auc": val_metrics["auc"],
@@ -455,7 +435,6 @@ def train_model(
                     indent=4,
                 )
 
-        # Save checkpoint
         if save_every is not None and save_every > 0 and (epoch + 1) % save_every == 0:
             torch.save(
                 {
@@ -469,7 +448,6 @@ def train_model(
                 checkpoint_path,
             )
 
-        # Save best model based on validation loss
         current_loss = val_metrics["loss"]
 
         if current_loss < best_loss:
@@ -481,17 +459,14 @@ def train_model(
         else:
             patience_counter += 1
 
-        # Early stopping
         if patience is not None and patience_counter >= patience:
             print("Early stopping triggered.")
             break
 
-    # Load best model before returning
     if best_model_path.exists():
         print(f"Loading best model from {best_model_path}")
         model.load_state_dict(torch.load(best_model_path, map_location=device))
 
-    # Save full history
     with open(history_path, "w") as f:
         json.dump(json_safe(history), f, indent=4)
 
@@ -522,6 +497,8 @@ def evaluate_model(model, test_loader, device=None):
         loader=test_loader,
         device=device,
         optimizer=None,
+        compute_auc=True,
+        compute_accuracy=True,
     )
 
     acc = metrics["accuracy"]
