@@ -13,10 +13,10 @@ import json
 # =========================================================
 def main():
     # --- Data ---
-    train_loader, val_loader, test_loader = get_dataloaders(batch_size=32)
+    train_loader, val_loader, test_loader = get_dataloaders(batch_size=8)
     in_channels = train_loader.dataset[0].x.shape[1]
     # --- Model ---
-    model = HybridGNN_QNN_basic_torch(in_channels=in_channels)
+    model = HybridGNN_MLP(in_channels=in_channels)
 
     model, history = nbtools.train_model(
             model,
