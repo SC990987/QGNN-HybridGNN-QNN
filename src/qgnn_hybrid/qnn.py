@@ -199,3 +199,65 @@ def qnn_torch_legacy_cry(x, weights, nq=N_QUBITS):
             re, im = apply_ry(re, im, weights[layer, q], q, nq)
 
     return _pauli_z_expectations(re, im, nq)
+
+# =========================================================
+# Optional torch.compile wrappers
+# =========================================================
+
+# =========================================================
+# Optional torch.compile wrappers
+# =========================================================
+
+_COMPILED_QNN_CACHE = {}
+
+
+def get_compiled_qnn(
+    fn,
+    nq,
+    mode="default",
+    backend=None,
+    dynamic=False,
+):
+    """
+    Lazily compile a fast PyTorch QNN function with fixed n_qubits.
+
+    Important:
+    We fix nq inside a wrapper instead of passing it as a runtime argument.
+    This makes torch.compile much happier because the tensor rank and
+    permutation lists are known at compile time.
+
+    Parameters
+    ----------
+    fn:
+        QNN function to compile, e.g. qnn_torch_basic.
+    nq:
+        Fixed number of qubits.
+    mode:
+        torch.compile mode.
+    backend:
+        Optional torch.compile backend.
+    dynamic:
+        Whether to use dynamic shapes. For this QNN simulator, False is safer.
+    """
+
+    key = (fn.__name__, nq, mode, backend, dynamic)
+
+    if key not in _COMPILED_QNN_CACHE:
+
+        def wrapped_qnn(x, weights):
+            return fn(x, weights, nq=nq)
+
+        compile_kwargs = {
+            "mode": mode,
+            "dynamic": dynamic,
+        }
+
+        if backend is not None:
+            compile_kwargs["backend"] = backend
+
+        _COMPILED_QNN_CACHE[key] = torch.compile(
+            wrapped_qnn,
+            **compile_kwargs,
+        )
+
+    return _COMPILED_QNN_CACHE[key]

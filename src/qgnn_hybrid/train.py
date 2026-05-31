@@ -4,10 +4,10 @@ import argparse
 import json
 import random
 from pathlib import Path
-import yaml
 
 import numpy as np
 import torch
+import yaml
 
 from qgnn_hybrid.data import get_dataloaders
 from qgnn_hybrid.models import (
@@ -37,6 +37,12 @@ MODEL_REGISTRY = {
     "particlenet": ParticleNet,
 }
 
+TORCH_QNN_MODELS = {
+    "qnn_basic_torch",
+    "qnn_improved_torch",
+    "qnn_legacy_cry_torch",
+}
+
 
 # =========================================================
 # Utilities
@@ -57,6 +63,10 @@ def build_model(
     hidden_dim: int,
     n_qubits: int,
     q_layers: int,
+    compile_qnn: bool = False,
+    compile_mode: str = "default",
+    compile_backend=None,
+    compile_dynamic: bool = True,
 ):
     """Create a model from the model registry."""
     model_cls = MODEL_REGISTRY[model_name]
@@ -73,6 +83,18 @@ def build_model(
             hidden_channels=hidden_dim,
         )
 
+    if model_name in TORCH_QNN_MODELS:
+        return model_cls(
+            in_channels=in_channels,
+            hidden_dim=hidden_dim,
+            n_qubits=n_qubits,
+            q_layers=q_layers,
+            compile_qnn=compile_qnn,
+            compile_mode=compile_mode,
+            compile_backend=compile_backend,
+            compile_dynamic=compile_dynamic,
+        )
+
     return model_cls(
         in_channels=in_channels,
         hidden_dim=hidden_dim,
@@ -82,19 +104,34 @@ def build_model(
 
 
 def load_config(config_path):
-    """Load YAML config file."""
+    """
+    Load YAML config file.
+
+    First tries the path as provided. If that fails, searches upward from this
+    file's location so configs can still be found when running from a subdir.
+    """
     if config_path is None:
         return {}
 
     config_path = Path(config_path)
 
-    if not config_path.exists():
-        raise FileNotFoundError(f"Config file not found: {config_path}")
+    candidate_paths = [config_path]
 
-    with open(config_path, "r") as f:
-        config = yaml.safe_load(f)
+    current_file = Path(__file__).resolve()
+    for parent in current_file.parents:
+        candidate_paths.append(parent / config_path)
 
-    return config or {}
+    for candidate in candidate_paths:
+        if candidate.exists():
+            with open(candidate, "r") as f:
+                config = yaml.safe_load(f)
+            return config or {}
+
+    searched = "\n".join(str(p) for p in candidate_paths)
+    raise FileNotFoundError(
+        f"Config file not found: {config_path}\n"
+        f"Searched:\n{searched}"
+    )
 
 
 def parse_args():
@@ -109,7 +146,14 @@ def parse_args():
         help="Optional path to YAML config file.",
     )
 
-    parser.add_argument("--model", type=str, default=None, choices=list(MODEL_REGISTRY.keys()))
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        choices=list(MODEL_REGISTRY.keys()),
+        help="Model architecture to train.",
+    )
+
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--patience", type=int, default=None)
@@ -126,11 +170,49 @@ def parse_args():
     parser.add_argument(
         "--save-history-every-epoch",
         action="store_true",
+        default=None,
         help="Save one JSON history file per epoch.",
     )
 
-    args = parser.parse_args()
+    parser.add_argument(
+        "--compile-qnn",
+        action="store_true",
+        default=None,
+        help="Compile only the fast PyTorch QNN function with torch.compile.",
+    )
 
+    parser.add_argument(
+        "--compile-mode",
+        type=str,
+        default=None,
+        choices=["default", "reduce-overhead", "max-autotune"],
+        help="torch.compile mode for the QNN function.",
+    )
+
+    parser.add_argument(
+        "--compile-backend",
+        type=str,
+        default=None,
+        help="Optional torch.compile backend for the QNN function.",
+    )
+
+    parser.add_argument(
+        "--compile-dynamic",
+        dest="compile_dynamic",
+        action="store_true",
+        default=None,
+        help="Use dynamic=True for torch.compile on the QNN function.",
+    )
+
+    parser.add_argument(
+        "--no-compile-dynamic",
+        dest="compile_dynamic",
+        action="store_false",
+        default=None,
+        help="Use dynamic=False for torch.compile on the QNN function.",
+    )
+
+    args = parser.parse_args()
     config = load_config(args.config)
 
     defaults = {
@@ -146,22 +228,30 @@ def parse_args():
         "output_dir": "outputs",
         "save_every": 1,
         "save_history_every_epoch": False,
+        "compile_qnn": False,
+        "compile_mode": "default",
+        "compile_backend": None,
+        "compile_dynamic": True,
     }
 
-    # Start from defaults, overwrite with config, then overwrite with CLI args.
+    # Start from defaults, overwrite with YAML config, then overwrite with CLI args.
     merged = defaults | config
 
     for key, value in vars(args).items():
         if key == "config":
             continue
 
-        # For regular args, CLI overrides config only if explicitly provided.
+        # CLI overrides config only if explicitly provided.
         if value is not None:
             merged[key] = value
 
-    # Special case: argparse store_true defaults to False, so preserve config unless CLI flag is used.
-    if args.save_history_every_epoch:
-        merged["save_history_every_epoch"] = True
+    # Warn if compile_qnn is requested for a model that does not use the fast Torch QNN.
+    if merged["compile_qnn"] and merged["model"] not in TORCH_QNN_MODELS:
+        print(
+            "Warning: compile_qnn=True was requested, but the selected model "
+            f"'{merged['model']}' does not use the fast Torch QNN backend. "
+            "The flag will have no effect."
+        )
 
     return argparse.Namespace(**merged)
 
@@ -192,6 +282,10 @@ def main():
         hidden_dim=args.hidden_dim,
         n_qubits=args.n_qubits,
         q_layers=args.q_layers,
+        compile_qnn=args.compile_qnn,
+        compile_mode=args.compile_mode,
+        compile_backend=args.compile_backend,
+        compile_dynamic=args.compile_dynamic,
     )
 
     print("=" * 70)
@@ -206,6 +300,10 @@ def main():
     print(f"Epochs: {args.epochs}")
     print(f"Patience: {args.patience}")
     print(f"Output directory: {output_dir}")
+    print(f"Compile QNN only: {args.compile_qnn}")
+    print(f"Compile mode: {args.compile_mode}")
+    print(f"Compile backend: {args.compile_backend}")
+    print(f"Compile dynamic: {args.compile_dynamic}")
     print("=" * 70)
 
     # --- Train ---
@@ -241,6 +339,10 @@ def main():
         "n_qubits": args.n_qubits,
         "q_layers": args.q_layers,
         "in_channels": int(in_channels),
+        "compile_qnn": args.compile_qnn,
+        "compile_mode": args.compile_mode,
+        "compile_backend": args.compile_backend,
+        "compile_dynamic": args.compile_dynamic,
         "history": history,
     }
 

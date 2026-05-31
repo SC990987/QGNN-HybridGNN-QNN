@@ -15,6 +15,42 @@ from .qnn import (
 
 
 # =========================================================
+# Helper for optional QNN-only torch.compile
+# =========================================================
+def _make_qnn_function(
+    qnn_fn,
+    n_qubits,
+    compile_qnn=False,
+    compile_mode="default",
+    compile_backend=None,
+    compile_dynamic=False,
+):
+    """
+    Return either an eager or compiled QNN function.
+
+    The returned function always has the signature:
+
+        qnn_fn_wrapped(x, weights)
+
+    Internally, n_qubits is fixed inside the wrapper. This is important for
+    torch.compile because n_qubits controls the rank of the state tensor and
+    the length of permutation lists used by two-qubit gates.
+    """
+    if compile_qnn:
+        from .qnn import get_compiled_qnn
+
+        return get_compiled_qnn(
+            qnn_fn,
+            nq=n_qubits,
+            mode=compile_mode,
+            backend=compile_backend,
+            dynamic=compile_dynamic,
+        )
+
+    return lambda x, weights: qnn_fn(x, weights, nq=n_qubits)
+
+
+# =========================================================
 # Shared GraphSAGE Encoder
 # =========================================================
 class GraphSAGEEncoder(torch.nn.Module):
@@ -70,7 +106,8 @@ class HybridGNN_QNN_Basic_PennyLane(torch.nn.Module):
 
         q_out = qnn_circuit_basic(x, self.q_weights)
 
-        # PennyLane returns a list/tuple of length n_qubits, each with shape (batch_size,).
+        # PennyLane returns a list/tuple of length n_qubits,
+        # each element has shape (batch_size,).
         x = torch.stack(q_out, dim=1).to(x.device).float()
 
         return self.fc(x)
@@ -106,7 +143,8 @@ class HybridGNN_QNN_Improved_PennyLane(torch.nn.Module):
 
         q_out = qnn_circuit_improved(x, self.q_weights)
 
-        # PennyLane returns a list/tuple of length n_qubits, each with shape (batch_size,).
+        # PennyLane returns a list/tuple of length n_qubits,
+        # each element has shape (batch_size,).
         x = torch.stack(q_out, dim=1).to(x.device).float()
 
         return self.fc(x)
@@ -123,7 +161,17 @@ class HybridGNN_QNN_Basic_Torch(torch.nn.Module):
     It uses CNOT entanglement and should be used as the default fast QNN model.
     """
 
-    def __init__(self, in_channels, hidden_dim=64, n_qubits=8, q_layers=4):
+    def __init__(
+        self,
+        in_channels,
+        hidden_dim=64,
+        n_qubits=8,
+        q_layers=4,
+        compile_qnn=False,
+        compile_mode="default",
+        compile_backend=None,
+        compile_dynamic=False,
+    ):
         super().__init__()
         self.n_qubits = n_qubits
         self.encoder = GraphSAGEEncoder(in_channels, hidden_dim, n_qubits)
@@ -134,9 +182,18 @@ class HybridGNN_QNN_Basic_Torch(torch.nn.Module):
 
         self.fc = torch.nn.Linear(n_qubits, 2)
 
+        self.qnn_fn = _make_qnn_function(
+            qnn_torch_basic,
+            n_qubits=n_qubits,
+            compile_qnn=compile_qnn,
+            compile_mode=compile_mode,
+            compile_backend=compile_backend,
+            compile_dynamic=compile_dynamic,
+        )
+
     def forward(self, x, edge_index, batch):
         x = self.encoder(x, edge_index, batch)
-        x = qnn_torch_basic(x, self.q_weights, self.n_qubits)
+        x = self.qnn_fn(x, self.q_weights)
         return self.fc(x)
 
 
@@ -150,7 +207,17 @@ class HybridGNN_QNN_Improved_Torch(torch.nn.Module):
     This is the fast simulator equivalent of HybridGNN_QNN_Improved_PennyLane.
     """
 
-    def __init__(self, in_channels, hidden_dim=64, n_qubits=8, q_layers=4):
+    def __init__(
+        self,
+        in_channels,
+        hidden_dim=64,
+        n_qubits=8,
+        q_layers=4,
+        compile_qnn=False,
+        compile_mode="default",
+        compile_backend=None,
+        compile_dynamic=False,
+    ):
         super().__init__()
         self.n_qubits = n_qubits
         self.encoder = GraphSAGEEncoder(in_channels, hidden_dim, n_qubits)
@@ -161,9 +228,18 @@ class HybridGNN_QNN_Improved_Torch(torch.nn.Module):
 
         self.fc = torch.nn.Linear(n_qubits, 2)
 
+        self.qnn_fn = _make_qnn_function(
+            qnn_torch_improved,
+            n_qubits=n_qubits,
+            compile_qnn=compile_qnn,
+            compile_mode=compile_mode,
+            compile_backend=compile_backend,
+            compile_dynamic=compile_dynamic,
+        )
+
     def forward(self, x, edge_index, batch):
         x = self.encoder(x, edge_index, batch)
-        x = qnn_torch_improved(x, self.q_weights, self.n_qubits)
+        x = self.qnn_fn(x, self.q_weights)
         return self.fc(x)
 
 
@@ -183,7 +259,17 @@ class HybridGNN_QNN_LegacyCRY_Torch(torch.nn.Module):
     earlier experiments.
     """
 
-    def __init__(self, in_channels, hidden_dim=64, n_qubits=8, q_layers=4):
+    def __init__(
+        self,
+        in_channels,
+        hidden_dim=64,
+        n_qubits=8,
+        q_layers=4,
+        compile_qnn=False,
+        compile_mode="default",
+        compile_backend=None,
+        compile_dynamic=False,
+    ):
         super().__init__()
         self.n_qubits = n_qubits
         self.encoder = GraphSAGEEncoder(in_channels, hidden_dim, n_qubits)
@@ -194,9 +280,18 @@ class HybridGNN_QNN_LegacyCRY_Torch(torch.nn.Module):
 
         self.fc = torch.nn.Linear(n_qubits, 2)
 
+        self.qnn_fn = _make_qnn_function(
+            qnn_torch_legacy_cry,
+            n_qubits=n_qubits,
+            compile_qnn=compile_qnn,
+            compile_mode=compile_mode,
+            compile_backend=compile_backend,
+            compile_dynamic=compile_dynamic,
+        )
+
     def forward(self, x, edge_index, batch):
         x = self.encoder(x, edge_index, batch)
-        x = qnn_torch_legacy_cry(x, self.q_weights, self.n_qubits)
+        x = self.qnn_fn(x, self.q_weights)
         return self.fc(x)
 
 
@@ -298,6 +393,20 @@ class ParticleNet(torch.nn.Module):
 
         x = F.relu(self.fc1(x))
         return self.fc2(x)
+
+
+# =========================================================
+# Backward-compatible aliases for older notebooks/scripts
+# =========================================================
+HybridGNN_QNN_basic = HybridGNN_QNN_Basic_PennyLane
+HybridGNN_QNN_improved = HybridGNN_QNN_Improved_PennyLane
+
+HybridGNN_QNN_basic_torch = HybridGNN_QNN_Basic_Torch
+HybridGNN_QNN_improved_torch = HybridGNN_QNN_Improved_Torch
+
+HybridGNN_QNN_legacy_torch = HybridGNN_QNN_LegacyCRY_Torch
+HybridGNN_QNN_legacy_cry_torch = HybridGNN_QNN_LegacyCRY_Torch
+
 
 __all__ = [
     "GraphSAGEEncoder",

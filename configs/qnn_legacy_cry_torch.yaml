@@ -13,3 +13,8 @@ q_layers: 4
 output_dir: outputs/qnn_legacy_cry_torch
 save_every: 1
 save_history_every_epoch: false
+
+compile_qnn: true
+compile_mode: default
+compile_backend: null
+compile_dynamic: true
