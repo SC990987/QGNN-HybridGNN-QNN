@@ -226,7 +226,24 @@ class HybridGNN_MLP(torch.nn.Module):
         x = self.mlp(x)
         return self.fc(x)
 
+# =========================================================
+# Matched Bottleneck Ablation: Linear Head
+# =========================================================
+class HybridGNN_LinearHead(torch.nn.Module):
+    """
+    Matched bottleneck baseline using the same GraphSAGE encoder as the
+    GNN-MLP and GNN-QNN models, but with no MLP or QNN head.
+    """
 
+    def __init__(self, in_channels, hidden_dim=64, n_qubits=8, q_layers=4):
+        super().__init__()
+        self.encoder = GraphSAGEEncoder(in_channels, hidden_dim, n_qubits)
+        self.fc = torch.nn.Linear(n_qubits, 2)
+
+    def forward(self, x, edge_index, batch):
+        x = self.encoder(x, edge_index, batch)
+        return self.fc(x)
+    
 # =========================================================
 # GraphSAGE Baseline
 # =========================================================
@@ -298,7 +315,7 @@ class ParticleNet(torch.nn.Module):
 
         x = F.relu(self.fc1(x))
         return self.fc2(x)
-
+    
 __all__ = [
     "GraphSAGEEncoder",
     "HybridGNN_QNN_Basic_PennyLane",
@@ -315,4 +332,5 @@ __all__ = [
     "HybridGNN_QNN_improved_torch",
     "HybridGNN_QNN_legacy_torch",
     "HybridGNN_QNN_legacy_cry_torch",
+    "HybridGNN_LinearHead",
 ]

@@ -19,6 +19,7 @@ from qgnn_hybrid.models import (
     HybridGNN_MLP,
     JetGNN,
     ParticleNet,
+    HybridGNN_LinearHead
 )
 import qgnn_hybrid.utils as nbtools
 
@@ -35,6 +36,7 @@ MODEL_REGISTRY = {
     "gnn_mlp": HybridGNN_MLP,
     "graphsage": JetGNN,
     "particlenet": ParticleNet,
+    "gnn_linear_ablation": HybridGNN_LinearHead,
 }
 
 

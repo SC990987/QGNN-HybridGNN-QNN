@@ -1,6 +1,7 @@
 # data.py
 
 from pathlib import Path
+import shutil
 import urllib.request
 import random
 
@@ -21,7 +22,9 @@ DATA_URL = "https://zenodo.org/record/3164691/files/QG_jets.npz"
 DEFAULT_DATA_DIR = Path("data")
 DEFAULT_RAW_DIR = DEFAULT_DATA_DIR / "raw"
 DEFAULT_PROCESSED_DIR = DEFAULT_DATA_DIR / "processed"
+
 DEFAULT_DATA_PATH = DEFAULT_RAW_DIR / "QG_jets.npz"
+LEGACY_DATA_PATH = Path("QG_jets.npz")
 
 
 # =========================================================
@@ -31,18 +34,20 @@ def download_dataset(path=DEFAULT_DATA_PATH, url=DATA_URL):
     """
     Download the QG jets dataset if it does not already exist.
 
-    Parameters
-    ----------
-    path:
-        Local path where QG_jets.npz should be stored.
-    url:
-        Dataset URL.
+    If a legacy root-level QG_jets.npz file exists, copy it into data/raw/
+    instead of downloading again.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     if path.exists():
         print(f"Dataset already exists at {path}")
+        return path
+
+    if LEGACY_DATA_PATH.exists():
+        print(f"Found legacy dataset at {LEGACY_DATA_PATH}")
+        print(f"Copying dataset to {path}")
+        shutil.copy2(LEGACY_DATA_PATH, path)
         return path
 
     print(f"Downloading dataset to {path}...")
@@ -95,9 +100,19 @@ def load_raw_data(files=None):
 # =========================================================
 # Graph construction
 # =========================================================
-def build_graphs(X, y, k=16, max_events=None, min_particles=2):
+def build_graphs(
+    X,
+    y,
+    k=16,
+    max_events=None,
+    min_particles=None,
+):
     """
     Convert raw jet arrays into PyTorch Geometric Data objects.
+
+    By default, min_particles is set equal to k. This preserves the original
+    benchmark behavior, where jets with fewer than k valid particles were
+    skipped.
 
     Parameters
     ----------
@@ -111,12 +126,16 @@ def build_graphs(X, y, k=16, max_events=None, min_particles=2):
         Optional maximum number of events to process. Useful for debugging.
     min_particles:
         Minimum number of non-padded particles required to build a graph.
+        If None, defaults to k.
 
     Returns
     -------
     graph_list:
         List of PyTorch Geometric Data objects.
     """
+    if min_particles is None:
+        min_particles = k
+
     graph_list = []
 
     n_events = X.shape[0]
@@ -134,6 +153,8 @@ def build_graphs(X, y, k=16, max_events=None, min_particles=2):
             skipped += 1
             continue
 
+        # Preserve original benchmark behavior:
+        # skip jets with fewer than k valid particles by default.
         if node_features.shape[0] < min_particles:
             skipped += 1
             continue
@@ -154,17 +175,21 @@ def build_graphs(X, y, k=16, max_events=None, min_particles=2):
 
     print(f"Built {len(graph_list)} graphs.")
     if skipped > 0:
-        print(f"Skipped {skipped} events with too few valid particles.")
+        print(f"Skipped {skipped} events with fewer than {min_particles} valid particles.")
 
     return graph_list
 
 
+# =========================================================
+# Processed graph cache
+# =========================================================
 def save_processed_graphs(graph_list, path):
     """
     Save processed graph objects to disk.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+
     torch.save(graph_list, path)
     print(f"Saved processed graphs to {path}")
 
@@ -196,37 +221,33 @@ def load_processed_graphs(path):
     return graph_list
 
 
-def get_processed_path(k=16, max_events=None):
+def get_processed_path(k=16, max_events=None, min_particles=None):
     """
     Build a deterministic processed-cache filename.
-    """
-    if max_events is None:
-        return DEFAULT_PROCESSED_DIR / f"qg_jets_k{k}.pt"
 
-    return DEFAULT_PROCESSED_DIR / f"qg_jets_k{k}_max{max_events}.pt"
+    min_particles is included in the filename because changing the filtering
+    rule changes the graph dataset.
+    """
+    if min_particles is None:
+        min_particles = k
+
+    if max_events is None:
+        return DEFAULT_PROCESSED_DIR / f"qg_jets_k{k}_min{min_particles}.pt"
+
+    return DEFAULT_PROCESSED_DIR / f"qg_jets_k{k}_min{min_particles}_max{max_events}.pt"
 
 
 # =========================================================
 # Splitting and dataloaders
 # =========================================================
-def split_data(graph_list, seed=42, train_frac=0.70, val_frac=0.15):
+def split_data(
+    graph_list,
+    seed=42,
+    train_frac=0.70,
+    val_frac=0.15,
+):
     """
     Split graph list into train, validation, and test sets.
-
-    Parameters
-    ----------
-    graph_list:
-        List of Data objects.
-    seed:
-        Random seed for reproducible shuffling.
-    train_frac:
-        Fraction assigned to training.
-    val_frac:
-        Fraction assigned to validation.
-
-    Returns
-    -------
-    train_data, val_data, test_data
     """
     if not 0 < train_frac < 1:
         raise ValueError("train_frac must be between 0 and 1.")
@@ -238,6 +259,7 @@ def split_data(graph_list, seed=42, train_frac=0.70, val_frac=0.15):
         raise ValueError("train_frac + val_frac must be less than 1.")
 
     graph_list = list(graph_list)
+
     rng = random.Random(seed)
     rng.shuffle(graph_list)
 
@@ -268,6 +290,7 @@ def get_dataloaders(
     download=True,
     use_cache=True,
     max_events=None,
+    min_particles=None,
     train_frac=0.70,
     val_frac=0.15,
     num_workers=0,
@@ -278,6 +301,10 @@ def get_dataloaders(
     This function remains compatible with:
 
         get_dataloaders(batch_size=32)
+
+    Default behavior:
+        min_particles defaults to k, preserving the original benchmark dataset
+        construction where jets with fewer than k valid particles are skipped.
 
     Parameters
     ----------
@@ -295,6 +322,8 @@ def get_dataloaders(
         If True, save/load processed graph objects from data/processed.
     max_events:
         Optional maximum number of events for debugging.
+    min_particles:
+        Minimum number of non-padded particles required. If None, defaults to k.
     train_frac:
         Fraction of data used for training.
     val_frac:
@@ -306,18 +335,32 @@ def get_dataloaders(
     -------
     train_loader, val_loader, test_loader
     """
+    if min_particles is None:
+        min_particles = k
+
     if files is None:
         if download:
             download_dataset(DEFAULT_DATA_PATH)
         files = [DEFAULT_DATA_PATH]
 
-    processed_path = get_processed_path(k=k, max_events=max_events)
+    processed_path = get_processed_path(
+        k=k,
+        max_events=max_events,
+        min_particles=min_particles,
+    )
 
     if use_cache and processed_path.exists():
         graph_list = load_processed_graphs(processed_path)
     else:
         X, y = load_raw_data(files)
-        graph_list = build_graphs(X, y, k=k, max_events=max_events)
+
+        graph_list = build_graphs(
+            X,
+            y,
+            k=k,
+            max_events=max_events,
+            min_particles=min_particles,
+        )
 
         if use_cache:
             save_processed_graphs(graph_list, processed_path)

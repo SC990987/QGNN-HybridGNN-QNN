@@ -6,9 +6,9 @@ patience: 2
 seed: 42
 lr: 0.001
 
-hidden_dim: 32
+hidden_dim: 64
 n_qubits: 8
-q_layers: 1
+q_layers: 2
 
 output_dir: outputs/debug_gnn_mlp
 save_every: 1
